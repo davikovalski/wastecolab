@@ -1,0 +1,51 @@
+[project]
+name = "wastecolab-backend"
+version = "0.1.0"
+description = "Waste Colab: ETL (Pandas) e API (FastAPI) de rotas de valorização de resíduos"
+requires-python = ">=3.12"
+dependencies = [
+  "pandas>=2.2",
+  "psycopg[binary]>=3.2",
+  "pydantic-settings>=2.4",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "mypy>=1.10",
+  "pandas-stubs>=2.2",
+  "ruff>=0.6",
+]
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["etl*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integracao: precisa de um PostgreSQL/PostGIS em DATABASE_URL"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "ANN"]
+ignore = ["ANN401"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["ANN"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+disallow_any_explicit = true
+packages = ["etl"]
+
+[[tool.mypy.overrides]]
+# pydantic-settings expõe `Any` na classe base; o resto do pacote continua estrito.
+module = "etl.config"
+disallow_any_explicit = false
