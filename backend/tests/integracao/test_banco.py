@@ -4,63 +4,27 @@ Precisa de um PostgreSQL com PostGIS disponível em TEST_DATABASE_URL.
 ATENÇÃO: os schemas `public` e `extensions` desse banco são apagados e recriados.
 """
 
-import os
 from collections.abc import Iterator
-from pathlib import Path
 
-import pandas as pd
 import psycopg
 import pytest
 
-from etl import pipelines
-from tests.etl.test_municipal import _linha
+from tests.banco_teste import URL, preparar_banco
 
 pytestmark = pytest.mark.integracao
 
-URL = os.environ.get("TEST_DATABASE_URL")
-RAIZ = Path(__file__).resolve().parents[3]
-MIGRATIONS = sorted((RAIZ / "supabase" / "migrations").glob("*.sql"))
-ROLES_LOCAIS = RAIZ / "supabase" / "local" / "roles.sql"
+
+@pytest.fixture(scope="module")
+def banco(tmp_path_factory: pytest.TempPathFactory) -> str:
+    if URL is None:
+        pytest.skip("defina TEST_DATABASE_URL para rodar os testes de integração")
+    preparar_banco(URL, tmp_path_factory.mktemp("banco"))
+    return URL
 
 
 @pytest.fixture
-def conn(tmp_path: Path, destinador_bruto, gerador_bruto, ibge_bruto) -> Iterator[psycopg.Connection]:
-    if URL is None:
-        pytest.skip("defina TEST_DATABASE_URL para rodar os testes de integração")
-    with psycopg.connect(URL, autocommit=True) as admin:
-        admin.execute("drop schema if exists public cascade")
-        admin.execute("drop schema if exists extensions cascade")
-        admin.execute("create schema public")
-        admin.execute(ROLES_LOCAIS.read_text(encoding="utf-8"))
-        for arquivo in MIGRATIONS:
-            admin.execute(arquivo.read_text(encoding="utf-8"))
-
-    ibge = tmp_path / "municipios.csv"
-    ibge_bruto.to_csv(ibge, index=False)
-    destinador = tmp_path / "destinador.csv"
-    destinador_bruto.to_csv(destinador, sep=";", index=False)
-    gerador = tmp_path / "gerador.csv"
-    gerador_bruto.to_csv(gerador, sep=";", index=False)
-    municipal = tmp_path / "municipal_2025.csv"
-    pd.DataFrame([_linha(**{"Município Declarante": "São Paulo", "UF Declarante": "SP"})]).to_csv(
-        municipal, sep=";", index=False
-    )
-    # Edição antiga (formato de 2022): outra declaração do mesmo município, entregue antes.
-    municipal_2022 = tmp_path / "municipal_2022.csv"
-    antiga = _linha(**{"Declaração": "9.001", "Ano": "2022", "Ano Referencia": "2021",
-                       "Data Entrega": "20/04/2022", "Município Declarante": "São Paulo",
-                       "UF Declarante": "SP", "Possui Plano de Gestão": "Não", "Massa (TON)": "1.681,20"})
-    pd.DataFrame([antiga]).to_csv(municipal_2022, sep=";", index=False, encoding="utf-8-sig")
-
-    with psycopg.connect(URL) as c:
-        for _ in range(2):  # a carga precisa ser repetível
-            pipelines.carregar_ibge(c, ibge)
-            pipelines.carregar_ibama(c, destinador, gerador, None, tmp_path / "relatorios", 2)
-            # A edição mais nova é carregada primeiro de propósito: a vigente não depende da ordem.
-            pipelines.carregar_municipais(c, [municipal, municipal_2022], tmp_path / "relatorios")
-            c.commit()
-        pipelines.atualizar_views(c)
-        c.commit()
+def conn(banco: str) -> Iterator[psycopg.Connection]:
+    with psycopg.connect(banco) as c:
         yield c
 
 
