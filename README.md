@@ -10,7 +10,7 @@ Escopo, histórias de usuário e decisões: [`docs/etapa-1-escopo-e-arquitetura.
 | `supabase/` | Migrations do PostgreSQL/PostGIS (Supabase) | Etapa 2 |
 | `backend/etl/` | ETL em Python + Pandas | Etapa 2 |
 | `backend/app/` | API FastAPI (somente leitura) | Etapa 3 |
-| `mobile/` | App Expo + TypeScript + NativeWind | próxima etapa |
+| `mobile/` | App Expo + TypeScript + NativeWind | Etapa 4 |
 
 ## Banco de dados (`supabase/migrations`)
 
@@ -80,6 +80,37 @@ uvicorn app.main:criar_app --factory --reload
 - Respostas 200 de `/v1/*` têm `ETag` (data da última carga do ETL) e `Cache-Control: public, max-age=300`;
   `If-None-Match` devolve 304 sem consultar a busca.
 - Campos sem dado vêm como `null`, nunca 0.
+
+## App (`mobile/`)
+
+Expo SDK 58 + Expo Router + TypeScript strict + NativeWind. Arquitetura: [`docs/etapa-4-app.md`](docs/etapa-4-app.md).
+
+```bash
+cd mobile
+npm install
+cp .env.example .env     # EXPO_PUBLIC_API_URL = IP do computador na rede local, ex.: http://192.168.0.10:8000
+npx expo start           # abra no celular com o Expo Go (mesma rede Wi-Fi)
+```
+
+Para o celular alcançar a API, suba o uvicorn com `--host 0.0.0.0`.
+
+| Tela | Rota | História |
+|---|---|---|
+| Lista | `/` | HU1: filtros, lista paginada, vazio com "Aumentar raio" e "Limpar filtros" |
+| Mapa | `/mapa` | HU2: mesmos filtros e mesma consulta da lista, agrupamento por município, linhas até os destinadores |
+| Detalhe | `/oportunidade/[cnpj]/[codigo]` | HU3: gerador, destinadores por distância, contexto municipal, fontes |
+
+- **Filtros na URL:** lista e mapa leem os mesmos search params, então alternar entre eles não busca de novo.
+- **Offline:** o TanStack Query guarda os resultados no aparelho (AsyncStorage) por 7 dias. Sem conexão,
+  aparece o banner "Você está offline" e o último resultado, com a data.
+- **Tipos da API:** gerados do contrato OpenAPI. Quando a API mudar:
+  `cd backend && python -m app.exportar_openapi` e depois `cd mobile && npm run gerar:api`
+  (um teste do backend falha se `mobile/openapi.json` ficar desatualizado).
+
+```bash
+npm run typecheck && npm run lint && npm test   # tsc, ESLint (no-explicit-any = erro) e Jest
+npm run build:web                               # build web só para verificação (o mapa é exclusivo do app)
+```
 
 ## Testes
 
