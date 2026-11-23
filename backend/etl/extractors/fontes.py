@@ -62,4 +62,5 @@ def ler_gerador_em_lotes(caminho: Path, tamanho_lote: int) -> Iterator[pd.DataFr
 
 
 def ler_diagnostico_municipal(caminho: Path) -> pd.DataFrame:
-    return pd.read_csv(caminho, sep=";", dtype=str, encoding="utf-8")
+    # "utf-8-sig" remove o BOM que aparece em algumas edições.
+    return pd.read_csv(caminho, sep=";", dtype=str, encoding="utf-8-sig")

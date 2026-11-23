@@ -8,8 +8,8 @@ from typing import Final
 
 import pandas as pd
 
-from etl.transform.numeros import inteiro_ou_nulo, numero_ponto
-from etl.transform.texto import limpar_texto, normalizar_nome
+from etl.transform.numeros import inteiro_ou_nulo, numero_br, numero_ponto
+from etl.transform.texto import normalizar_nome
 
 COLUNAS: Final[dict[str, str]] = {
     "Declaração": "declaracao_id",
@@ -104,18 +104,43 @@ class ResultadoMunicipal:
     metas: pd.DataFrame
 
 
+COLUNAS_NUMERICAS: Final = ("massa_ton", "material_percentual", "destinacao_percentual",
+                              "meta_valor_atual", "meta_valor")
+
+# Marcadores de "não informado" usados em algumas edições (ex.: 2022).
+NAO_INFORMADO: Final = frozenset({"N/I", "NI", "-"})
+
+
+def padronizar_colunas(bruto: pd.DataFrame) -> pd.DataFrame:
+    """Algumas edições têm BOM, nomes de coluna com espaços e valores com espaços à direita."""
+    df = bruto.rename(columns=lambda c: str(c).lstrip("\ufeff").strip())
+    faltando = sorted(set(COLUNAS) - set(df.columns))
+    if faltando:
+        raise ValueError(f"Colunas ausentes no diagnóstico municipal: {faltando}")
+    df = df[list(COLUNAS)].rename(columns=COLUNAS).astype("string")
+    for coluna in df.columns:
+        limpa = df[coluna].str.strip()
+        df[coluna] = limpa.mask(limpa.isin(NAO_INFORMADO) | (limpa == ""))
+    return df
+
+
+def usa_formato_brasileiro(df: pd.DataFrame) -> bool:
+    """Edições antigas usam "1.681,20"; as recentes, "1681.2". Decide pelo arquivo inteiro."""
+    return any(bool(df[c].str.contains(",", regex=False).any()) for c in COLUNAS_NUMERICAS)
+
+
 def transformar_diagnostico(bruto: pd.DataFrame) -> ResultadoMunicipal:
-    df = bruto.rename(columns=COLUNAS)[list(COLUNAS.values())].drop_duplicates().copy()
-    for coluna in ("declarante", "municipio", "uf_sigla", "tipo_residuo", "link_plano", "material",
-                   "destinacao", "meta_tipo", "meta_prazo", "meta_programa",
-                   "meta_programa_descritivo", "periodicidade_revisao_texto"):
-        df[coluna] = limpar_texto(df[coluna])
-    df["declaracao_id"] = pd.to_numeric(df["declaracao_id"], errors="raise").astype("int64")
+    df = padronizar_colunas(bruto).drop_duplicates().copy()
+    # A edição de 2022 escreve o número da declaração com separador de milhar ("8.602").
+    so_digitos = df["declaracao_id"].str.replace(r"\D", "", regex=True)
+    if so_digitos.isna().any() or (so_digitos == "").any():
+        raise ValueError("Há linhas sem número de declaração no diagnóstico municipal.")
+    df["declaracao_id"] = so_digitos.astype("int64")
     df["ano"] = pd.to_numeric(df["ano"]).astype("int64")
     df["ano_referencia"] = pd.to_numeric(df["ano_referencia"]).astype("int64")
-    for coluna in ("massa_ton", "material_percentual", "destinacao_percentual",
-                   "meta_valor_atual", "meta_valor"):
-        df[coluna] = numero_ponto(df[coluna])
+    converter = numero_br if usa_formato_brasileiro(df) else numero_ponto
+    for coluna in COLUNAS_NUMERICAS:
+        df[coluna] = converter(df[coluna])
     # Há percentuais impossíveis na fonte (ex.: 2000): viram "não informado".
     for coluna in ("material_percentual", "destinacao_percentual"):
         df[coluna] = df[coluna].where(df[coluna].between(0, 100))
@@ -191,11 +216,3 @@ def transformar_diagnostico(bruto: pd.DataFrame) -> ResultadoMunicipal:
         destinacoes_material=destinacoes_material,
         metas=metas.reset_index(drop=True),
     )
-
-
-def marcar_vigentes(declaracoes: pd.DataFrame) -> "pd.Series[bool]":
-    """Por município (municipio_id), vale a declaração com a data de entrega mais recente
-    (desempate pelo maior id)."""
-    ordenadas = declaracoes.sort_values(["municipio_id", "data_entrega", "id"])
-    ultimas = ordenadas.drop_duplicates("municipio_id", keep="last")["id"]
-    return declaracoes["id"].isin(ultimas) & declaracoes["municipio_id"].notna()

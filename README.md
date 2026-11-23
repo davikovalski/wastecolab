@@ -40,13 +40,17 @@ python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env            # preencha DATABASE_URL (conexão direta, usuário postgres)
 
-python -m etl.run todas --municipal "caminho/Municipal - Diagnostico.csv"
+python -m etl.run todas --municipal diag_2022.csv diag_2024.csv diag_2025.csv
 ```
 
 - Baixa sozinho os arquivos do IBAMA (destinador ~73 MB e gerador ~830 MB) e a base de municípios
   para `backend/data/`, e reaproveita o que já foi baixado (`--baixar-novamente` força o download).
 - Etapas separadas: `python -m etl.run ibge | ibama | municipal`. `--sem-gerador` pula o arquivo
   grande, mas aí os geradores ficam sem município e não viram oportunidade.
+- Aceita várias edições do diagnóstico municipal (2022, 2024, 2025...). Todas ficam no banco como
+  histórico, e a declaração **vigente** de cada município é a de entrega mais recente, qualquer que
+  seja a ordem dos arquivos. A edição de 2022 (com BOM, colunas com espaços, "N/I" e números como
+  "1.681,20") é tratada automaticamente.
 - Pode ser repetido: usa upsert e substitui as movimentações da fonte a cada carga.
 - Gera relatórios em `backend/relatorios/` (linhas rejeitadas, estabelecimentos sem município).
 - Carga completa num Postgres local: cerca de 70 segundos, com pico de ~270 MB de memória.
