@@ -9,7 +9,7 @@ Escopo, histórias de usuário e decisões: [`docs/etapa-1-escopo-e-arquitetura.
 |---|---|---|
 | `supabase/` | Migrations do PostgreSQL/PostGIS (Supabase) | Etapa 2 |
 | `backend/etl/` | ETL em Python + Pandas | Etapa 2 |
-| `backend/app/` | API FastAPI | próxima etapa |
+| `backend/app/` | API FastAPI (somente leitura) | Etapa 3 |
 | `mobile/` | App Expo + TypeScript + NativeWind | próxima etapa |
 
 ## Banco de dados (`supabase/migrations`)
@@ -22,6 +22,8 @@ Escopo, histórias de usuário e decisões: [`docs/etapa-1-escopo-e-arquitetura.
 | `…0300_contexto_municipal` | Tabelas do diagnóstico municipal (`declaracao`, `meta`, …) |
 | `…0400_consultas` | Views materializadas e as funções `listar_oportunidades`, `rotas_da_oportunidade` e `atualizar_views` |
 | `…0500_seguranca` | RLS: leitura para `anon`/`authenticated`; escrita só pela service role |
+| `…0600_usuario_api` | Usuário `api_leitura` (só leitura, sem senha até você definir) usado pela API |
+| `…0700_busca_dinamica` | `listar_oportunidades` em PL/pgSQL com SQL dinâmico (plano próprio por chamada, ~0,1 s) |
 
 Os dados de referência estão numa migration (e não no `seed.sql`) porque o seed do Supabase só roda
 em ambiente local, e o app precisa dessas linhas em produção.
@@ -55,12 +57,36 @@ python -m etl.run todas --municipal diag_2022.csv diag_2024.csv diag_2025.csv
 - Gera relatórios em `backend/relatorios/` (linhas rejeitadas, estabelecimentos sem município).
 - Carga completa num Postgres local: cerca de 70 segundos, com pico de ~270 MB de memória.
 
+## API (`backend/app/`)
+
+```bash
+cd backend
+# .env: API_DATABASE_URL com o usuário api_leitura (ver .env.example)
+uvicorn app.main:criar_app --factory --reload
+# documentação interativa: http://localhost:8000/docs   contrato: /openapi.json
+```
+
+| Rota | Uso |
+|---|---|
+| `GET /v1/saude` | Banco ok e data da última carga |
+| `GET /v1/residuos?q=` | Filtro de resíduo (código ou descrição, sem acento) |
+| `GET /v1/municipios?uf=&q=` | Filtro de município |
+| `GET /v1/oportunidades` | Lista e mapa (raio 25/50/100/250/500, UF, município, lat/lon, resíduo, perigoso, ordem, paginação) |
+| `GET /v1/oportunidades/{cnpj}/{codigo}` | Detalhe com destinadores e contexto do município |
+| `GET /v1/municipios/{id_ibge}/contexto` | Contexto municipal (`contexto: null` quando não há diagnóstico) |
+
+- Erros sempre em `{"erro": {"codigo", "mensagem", "detalhes"}}`: `nao_encontrado` (404),
+  `parametro_invalido` (422), `banco_indisponivel` (503), `erro_interno` (500).
+- Respostas 200 de `/v1/*` têm `ETag` (data da última carga do ETL) e `Cache-Control: public, max-age=300`;
+  `If-None-Match` devolve 304 sem consultar a busca.
+- Campos sem dado vêm como `null`, nunca 0.
+
 ## Testes
 
 ```bash
 cd backend
 pytest tests/etl                                   # unitários
-TEST_DATABASE_URL=postgresql://... pytest tests/integracao   # ATENÇÃO: apaga os schemas public e extensions desse banco
+TEST_DATABASE_URL=postgresql://... pytest tests/integracao tests/api   # ATENÇÃO: apaga os schemas public e extensions desse banco
 ruff check . && mypy
 ```
 

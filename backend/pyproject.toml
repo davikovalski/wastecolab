@@ -5,13 +5,16 @@ description = "Waste Colab: ETL (Pandas) e API (FastAPI) de rotas de valorizaç�
 requires-python = ">=3.12"
 dependencies = [
   "pandas>=2.2",
-  "psycopg[binary]>=3.2",
+  "psycopg[binary,pool]>=3.2",
   "pydantic-settings>=2.4",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.0",
+  "httpx>=0.27",
   "mypy>=1.10",
   "pandas-stubs>=2.2",
   "ruff>=0.6",
@@ -22,7 +25,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["etl*"]
+include = ["etl*", "app*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -43,9 +46,10 @@ ignore = ["ANN401"]
 python_version = "3.12"
 strict = true
 disallow_any_explicit = true
-packages = ["etl"]
+packages = ["etl", "app"]
 
 [[tool.mypy.overrides]]
-# pydantic-settings expõe `Any` na classe base; o resto do pacote continua estrito.
-module = "etl.config"
+# Subclasses de BaseModel/BaseSettings herdam `Any` do pydantic (falso positivo de
+# disallow_any_explicit); nosso código nesses módulos não usa Any.
+module = ["etl.config", "app.core.config", "app.schemas.*", "app.core.erros"]
 disallow_any_explicit = false

@@ -43,8 +43,7 @@ def linha_destinador(
     }
 
 
-@pytest.fixture
-def destinador_bruto() -> pd.DataFrame:
+def criar_destinador_bruto() -> pd.DataFrame:
     aterro = "D5 - Aterramentos especialmente projetados"
     reciclagem = "R3 - Reciclagem/reaproveitamento de substâncias orgânicas que não sejam usadas como solventes"
     linhas = [
@@ -69,8 +68,7 @@ def destinador_bruto() -> pd.DataFrame:
     return pd.DataFrame(linhas, dtype="string")
 
 
-@pytest.fixture
-def gerador_bruto() -> pd.DataFrame:
+def criar_gerador_bruto() -> pd.DataFrame:
     base = {
         "Código da Categoria": "3",
         "Categoria de Atividade": "Indústria de Produtos Químicos",
@@ -96,8 +94,7 @@ def gerador_bruto() -> pd.DataFrame:
     return pd.DataFrame(linhas, dtype="string")
 
 
-@pytest.fixture
-def ibge_bruto() -> pd.DataFrame:
+def criar_ibge_bruto() -> pd.DataFrame:
     return pd.DataFrame(
         {
             "codigo_ibge": [3550308, 3530805, 4317103],
@@ -107,3 +104,18 @@ def ibge_bruto() -> pd.DataFrame:
             "codigo_uf": [35, 35, 43],
         }
     )
+
+
+@pytest.fixture
+def destinador_bruto() -> pd.DataFrame:
+    return criar_destinador_bruto()
+
+
+@pytest.fixture
+def gerador_bruto() -> pd.DataFrame:
+    return criar_gerador_bruto()
+
+
+@pytest.fixture
+def ibge_bruto() -> pd.DataFrame:
+    return criar_ibge_bruto()
