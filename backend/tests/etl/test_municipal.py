@@ -6,7 +6,6 @@ import pytest
 from etl.transform.municipal import (
     COLUNAS,
     categoria_destinacao,
-    marcar_vigentes,
     normalizar_prazo,
     transformar_diagnostico,
 )
@@ -80,10 +79,35 @@ def test_transformar_diagnostico_rejeita_meta_desconhecida():
         transformar_diagnostico(bruto)
 
 
-def test_marcar_vigentes_usa_entrega_mais_recente():
-    declaracoes = pd.DataFrame({
-        "id": [1, 2, 3, 4],
-        "municipio_id": pd.array([10, 10, 20, None], dtype="Int64"),
-        "data_entrega": [date(2025, 4, 1), date(2025, 5, 1), date(2025, 4, 1), date(2025, 4, 1)],
+def test_edicao_2022_com_bom_espacos_ni_e_numeros_brasileiros():
+    linha = _linha(**{
+        "Massa (TON)": "1.681,20", "Caracterização - Percentual": "N/I",
+        "Caracterização - Destinação percentual": "57,89", "Meta - Valor": "1.320.000",
+        "Meta - Valor Atual": "N/I", "Link do Plano": "N/I", "Declaração": "8.602",
     })
-    assert marcar_vigentes(declaracoes).tolist() == [False, True, True, False]
+    # Nomes de coluna com BOM e espaços, valores com espaços à direita (como no arquivo de 2022).
+    bruto = pd.DataFrame([{f"\ufeff{k}" if k == "Declaração" else f"{k}   ": f"{v}    " for k, v in linha.items()}])
+    r = transformar_diagnostico(bruto)
+
+    assert r.geracoes["massa_ton"].iloc[0] == pytest.approx(1681.2)
+    assert pd.isna(r.composicoes["percentual"].iloc[0])
+    assert r.destinacoes_material["percentual"].iloc[0] == pytest.approx(57.89)
+    assert r.metas["valor_meta"].iloc[0] == pytest.approx(1_320_000)
+    assert pd.isna(r.metas["valor_atual"].iloc[0])
+    assert pd.isna(r.declaracoes["link_plano"].iloc[0])
+    assert r.declaracoes["declarante"].iloc[0] == "Cruzeiro do Sul"
+    assert r.declaracoes["id"].iloc[0] == 8602  # "8.602" é separador de milhar, não decimal
+
+
+def test_material_ni_e_ignorado():
+    bruto = pd.DataFrame([_linha(), _linha(**{"Caracterização - Descrição": "N/I",
+                                              "Caracterização - Destinação": "N/I"})])
+    r = transformar_diagnostico(bruto)
+    assert r.materiais["descricao"].tolist() == ["Plástico"]
+    assert len(r.composicoes) == 1
+
+
+def test_coluna_ausente_gera_erro_claro():
+    bruto = pd.DataFrame([_linha()]).drop(columns=["Massa (TON)"])
+    with pytest.raises(ValueError, match="Massa"):
+        transformar_diagnostico(bruto)

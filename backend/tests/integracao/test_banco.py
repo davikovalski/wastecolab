@@ -41,16 +41,23 @@ def conn(tmp_path: Path, destinador_bruto, gerador_bruto, ibge_bruto) -> Iterato
     destinador_bruto.to_csv(destinador, sep=";", index=False)
     gerador = tmp_path / "gerador.csv"
     gerador_bruto.to_csv(gerador, sep=";", index=False)
-    municipal = tmp_path / "municipal.csv"
+    municipal = tmp_path / "municipal_2025.csv"
     pd.DataFrame([_linha(**{"Município Declarante": "São Paulo", "UF Declarante": "SP"})]).to_csv(
         municipal, sep=";", index=False
     )
+    # Edição antiga (formato de 2022): outra declaração do mesmo município, entregue antes.
+    municipal_2022 = tmp_path / "municipal_2022.csv"
+    antiga = _linha(**{"Declaração": "9.001", "Ano": "2022", "Ano Referencia": "2021",
+                       "Data Entrega": "20/04/2022", "Município Declarante": "São Paulo",
+                       "UF Declarante": "SP", "Possui Plano de Gestão": "Não", "Massa (TON)": "1.681,20"})
+    pd.DataFrame([antiga]).to_csv(municipal_2022, sep=";", index=False, encoding="utf-8-sig")
 
     with psycopg.connect(URL) as c:
         for _ in range(2):  # a carga precisa ser repetível
             pipelines.carregar_ibge(c, ibge)
             pipelines.carregar_ibama(c, destinador, gerador, None, tmp_path / "relatorios", 2)
-            pipelines.carregar_municipal(c, municipal, tmp_path / "relatorios")
+            # A edição mais nova é carregada primeiro de propósito: a vigente não depende da ordem.
+            pipelines.carregar_municipais(c, [municipal, municipal_2022], tmp_path / "relatorios")
             c.commit()
         pipelines.atualizar_views(c)
         c.commit()
@@ -96,6 +103,17 @@ def test_filtros_de_uf_e_codigo(conn):
         "select count(*) from listar_oportunidades(p_raio_km => 250, p_codigo_residuo => '070213',"
         " p_perigoso => false)"
     ).fetchone() == (1,)
+
+
+def test_varias_edicoes_mantem_historico_e_vigente_mais_recente(conn):
+    linhas = conn.execute(
+        "select id, ano_referencia, vigente from declaracao order by id"
+    ).fetchall()
+    assert linhas == [(9001, 2021, False), (14255, 2024, True)]
+    massa = conn.execute(
+        "select g.massa_ton from geracao_residuo g where g.declaracao_id = 9001"
+    ).fetchone()
+    assert float(massa[0]) == pytest.approx(1681.2)
 
 
 def test_contexto_municipal(conn):

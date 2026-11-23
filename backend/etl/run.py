@@ -4,7 +4,7 @@ Exemplos:
     python -m etl.run todas --municipal "data/Municipal - Diagnostico.csv"
     python -m etl.run ibge
     python -m etl.run ibama --sem-gerador     # pula o arquivo de 830 MB
-    python -m etl.run municipal --municipal data/diagnostico.csv
+    python -m etl.run municipal --municipal data/diag_2022.csv data/diag_2024.csv data/diag_2025.csv
 """
 
 import argparse
@@ -24,7 +24,8 @@ def _argumentos(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m etl.run", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("etapa", choices=["ibge", "ibama", "municipal", "todas"])
-    parser.add_argument("--municipal", type=Path, help="CSV do diagnóstico municipal")
+    parser.add_argument("--municipal", type=Path, nargs="+",
+                        help="Um ou mais CSVs do diagnóstico municipal (edições de anos diferentes)")
     parser.add_argument("--destinador", type=Path, help="CSV local do IBAMA (destinador)")
     parser.add_argument("--gerador", type=Path, help="CSV local do IBAMA (gerador)")
     parser.add_argument("--ibge", type=Path, help="CSV local de municípios do IBGE")
@@ -67,7 +68,11 @@ def main(argv: list[str] | None = None) -> int:
                     ajustes.relatorios_dir, ajustes.tamanho_lote_gerador,
                 )
             else:
-                resumo = pipelines.carregar_municipal(conn, args.municipal, ajustes.relatorios_dir)
+                resumos = pipelines.carregar_municipais(conn, args.municipal, ajustes.relatorios_dir)
+                conn.commit()
+                for resumo in resumos:
+                    log.info("Concluído %s", resumo)
+                continue
             conn.commit()
             log.info("Concluído %s", resumo)
         pipelines.atualizar_views(conn)

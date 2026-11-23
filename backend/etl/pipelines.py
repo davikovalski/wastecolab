@@ -19,7 +19,7 @@ from etl.transform.ibama import (
     transformar_lote_gerador,
 )
 from etl.transform.localidades import preparar_municipios_ibge, resolver_municipio
-from etl.transform.municipal import marcar_vigentes, transformar_diagnostico
+from etl.transform.municipal import transformar_diagnostico
 
 log = logging.getLogger(__name__)
 
@@ -201,9 +201,9 @@ def carregar_municipal(conn: Conexao, arquivo: Path, relatorios_dir: Path) -> Re
         declaracoes["municipio"], declaracoes["uf_sigla"], _municipios(conn)
     )
     sem_municipio = declaracoes[declaracoes["municipio_id"].isna()]
-    salvar_relatorio(relatorios_dir, "municipal_declaracoes_sem_municipio", sem_municipio)
+    salvar_relatorio(relatorios_dir, f"municipal_sem_municipio_{arquivo.stem}", sem_municipio)
     declaracoes = declaracoes.dropna(subset=["municipio_id"]).copy()
-    declaracoes["vigente"] = marcar_vigentes(declaracoes)
+    declaracoes["vigente"] = False  # recalculado no banco, considerando todas as edições já carregadas
     ids_validos = set(declaracoes["id"])
 
     fonte_id = registrar_fonte(conn, config.FONTE_MUNICIPAL, None, None)
@@ -222,9 +222,6 @@ def carregar_municipal(conn: Conexao, arquivo: Path, relatorios_dir: Path) -> Re
                     "data_criacao", "data_entrega", "possui_coleta_seletiva", "possui_plano_gestao",
                     "link_plano", "periodicidade_revisao_texto", "periodicidade_revisao_anos",
                     "ano_ultima_versao_plano", "vigente"]
-    with conn.cursor() as cur:
-        # Libera o índice único de "vigente" antes de atualizar.
-        cur.execute("update public.declaracao set vigente = false where vigente")
     n_decl = upsert(conn, "declaracao", declaracoes.astype({"municipio_id": "int64"}), colunas_decl, ["id"],
                     atualizar={c: f"excluded.{c}" for c in colunas_decl if c != "id"})
 
@@ -263,7 +260,7 @@ def carregar_municipal(conn: Conexao, arquivo: Path, relatorios_dir: Path) -> Re
                      ["declaracao_id", "tipo", "valor_atual", "valor_meta", "prazo_texto", "prazo_ano",
                       "programa", "programa_descritivo"], ["id"])
 
-    return ResumoCarga("municipal", {
+    return ResumoCarga(f"municipal ({arquivo.name})", {
         "declaracoes": n_decl,
         "declaracoes_sem_municipio": len(sem_municipio),
         "geracoes": len(geracoes),
@@ -271,6 +268,32 @@ def carregar_municipal(conn: Conexao, arquivo: Path, relatorios_dir: Path) -> Re
         "destinacoes_material": len(dest_mat),
         "metas": n_metas,
     })
+
+
+def recalcular_declaracoes_vigentes(conn: Conexao) -> int:
+    """Por município, vale a declaração com a data de entrega mais recente (desempate pelo maior id),
+    entre todas as edições carregadas (2022, 2024, 2025...)."""
+    with conn.cursor() as cur:
+        cur.execute("update public.declaracao set vigente = false where vigente")
+        cur.execute(
+            """
+            update public.declaracao d set vigente = true
+            from (
+              select distinct on (municipio_id) id
+              from public.declaracao
+              order by municipio_id, data_entrega desc, id desc
+            ) ultima
+            where d.id = ultima.id
+            """
+        )
+        return cur.rowcount
+
+
+def carregar_municipais(conn: Conexao, arquivos: list[Path], relatorios_dir: Path) -> list[ResumoCarga]:
+    resumos = [carregar_municipal(conn, arquivo, relatorios_dir) for arquivo in arquivos]
+    vigentes = recalcular_declaracoes_vigentes(conn)
+    resumos.append(ResumoCarga("municipal_vigentes", {"municipios_com_declaracao_vigente": vigentes}))
+    return resumos
 
 
 def atualizar_views(conn: Conexao) -> None:
